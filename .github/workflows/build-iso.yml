@@ -39,13 +39,11 @@ jobs:
           firefox
           gamemode
           mangohud
-          steam-installer
-          lutris
-          wine
           git
           curl
-          kvantum
           qt5-style-kvantum
+          qt6-style-kvantum
+          qt5-style-kvantum-themes
           EOF
 
       - name: macOS Tahoe Liquid Glass ve Oyun Ayarlarini Ekle
