@@ -22,10 +22,11 @@ jobs:
         run: |
           mkdir -p source-os-build && cd source-os-build
           lb config \
+            --mode ubuntu \
             --distribution noble \
             --archive-areas "main restricted universe multiverse" \
             --architectures amd64 \
-            --debian-installer live \
+            --linux-packages linux-image-generic \
             --iso-application "Source OS Gamer" \
             --iso-publisher "deniz291lab" \
             --iso-volume "SOURCE_OS_GAMER"
@@ -42,8 +43,8 @@ jobs:
           git
           curl
           qt5-style-kvantum
-          qt6-style-kvantum
           qt5-style-kvantum-themes
+          casper
           EOF
 
       - name: macOS Tahoe Liquid Glass ve Oyun Ayarlarini Ekle
