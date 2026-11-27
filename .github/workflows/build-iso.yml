@@ -1,0 +1,85 @@
+name: Source OS Gamer ISO Derleyici
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-ubuntu-iso:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Depoyu Cek
+        uses: actions/checkout@v4
+
+      - name: Gerekli Araclari Kur (live-build)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y live-build debootstrap squashfs-tools xorriso
+
+      - name: Source OS Gamer Yapilandirmasini Hazirla
+        run: |
+          mkdir -p source-os-build && cd source-os-build
+          lb config \
+            --distribution noble \
+            --archive-areas "main restricted universe multiverse" \
+            --architectures amd64 \
+            --debian-installer live \
+            --iso-application "Source OS Gamer" \
+            --iso-publisher "deniz291lab" \
+            --iso-volume "SOURCE_OS_GAMER"
+
+          mkdir -p config/package-lists
+          cat << 'EOF' > config/package-lists/source-os.list.chroot
+          kde-plasma-desktop
+          sddm
+          konsole
+          dolphin
+          firefox
+          gamemode
+          mangohud
+          steam-installer
+          lutris
+          wine
+          git
+          curl
+          kvantum
+          qt5-style-kvantum
+          EOF
+
+      - name: macOS Tahoe Liquid Glass ve Oyun Ayarlarini Ekle
+        run: |
+          cd source-os-build
+          mkdir -p config/hooks/live
+          cat << 'EOF' > config/hooks/live/01-macos-gaming.hook.chroot
+          #!/bin/bash
+          set -e
+          echo "Source OS Gamer yapilandiriliyor..."
+          
+          # Isletim sistemi adini degistir
+          sed -i 's/PRETTY_NAME=".*"/PRETTY_NAME="Source OS Gamer (Ubuntu)"/g' /etc/os-release
+          sed -i 's/NAME=".*"/NAME="Source OS Gamer"/g' /etc/os-release
+
+          # WhiteSur macOS Temasi ve Ikonlarini Indir
+          git clone https://github.com /tmp/WhiteSur-kde
+          cd /tmp/WhiteSur-kde && ./install.sh
+          
+          git clone https://github.com /tmp/WhiteSur-icon
+          cd /tmp/WhiteSur-icon && ./install.sh
+
+          rm -rf /tmp/WhiteSur*
+          EOF
+          chmod +x config/hooks/live/01-macos-gaming.hook.chroot
+
+      - name: ISO Dosyasini Derle
+        run: |
+          cd source-os-build
+          sudo lb build
+
+      - name: ISO Dosyasini GitHub Releases Bolumune Yukle
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0-alpha
+          name: Source OS Gamer v1.0 Alpha
+          files: source-os-build/*.iso
