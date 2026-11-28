@@ -27,8 +27,7 @@ jobs:
           mkdir -p ~/build/chroot
           mkdir -p ~/build/iso/casper
           mkdir -p ~/build/iso/boot/grub
-          REPO="http://ubuntu.com"
-          sudo debootstrap --arch=amd64 noble ~/build/chroot "$REPO"
+          sudo debootstrap --arch=amd64 noble ~/build/chroot http://ubuntu.com
 
       - name: 4. Baglantilar ve Depolar
         run: |
