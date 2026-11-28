@@ -1,0 +1,122 @@
+name: Source OS Gamer ISO Derleyici
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-ubuntu-iso:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 1. Depoyu Cek
+        uses: actions/checkout@v4
+
+      - name: 2. Araclari Kur
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc
+          sudo apt-get update -y
+          sudo apt-get install -y \
+            debootstrap squashfs-tools xorriso \
+            grub-pc-bin grub-efi-amd64-bin \
+            mtools git curl
+
+      - name: 3. Ubuntu Temel Sistemi Kur
+        run: |
+          mkdir -p ~/build/chroot
+          mkdir -p ~/build/iso/casper
+          mkdir -p ~/build/iso/boot/grub
+          REPO="http://ubuntu.com"
+          sudo debootstrap --arch=amd64 noble ~/build/chroot "$REPO"
+
+      - name: 4. Baglantilar ve Depolar
+        run: |
+          sudo mount --bind /dev ~/build/chroot/dev
+          sudo mount --bind /dev/pts ~/build/chroot/dev/pts
+          sudo mount -t proc proc ~/build/chroot/proc
+          sudo mount -t sysfs sysfs ~/build/chroot/sys
+          sudo cp /etc/resolv.conf ~/build/chroot/etc/resolv.conf
+
+          cat << 'EOF' | sudo tee ~/build/chroot/etc/apt/sources.list
+          deb http://ubuntu.com noble main restricted universe multiverse
+          deb http://ubuntu.com noble-updates main restricted universe multiverse
+          deb http://ubuntu.com noble-security main restricted universe multiverse
+          EOF
+
+      - name: 5. KDE Liquid Glass ve Oyun Paketleri
+        run: |
+          cat << 'EOF' | sudo tee ~/build/chroot/setup.sh
+          #!/bin/bash
+          set -e
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update -y
+          apt-get install -y --no-install-recommends \
+            linux-image-generic casper network-manager \
+            wireless-tools net-tools locales sudo \
+            kde-plasma-desktop sddm konsole dolphin \
+            firefox gamemode mangohud git curl \
+            qt5-style-kvantum qt5-style-kvantum-themes
+
+          locale-gen tr_TR.UTF-8 en_US.UTF-8
+          sed -i 's/PRETTY_NAME=".*"/PRETTY_NAME="Source OS Gamer"/g' /etc/os-release
+          sed -i 's/NAME=".*"/NAME="Source OS Gamer"/g' /etc/os-release
+
+          git clone --depth 1 https://github.com /tmp/ws-kde
+          cd /tmp/ws-kde && ./install.sh
+          git clone --depth 1 https://github.com /tmp/ws-icon
+          cd /tmp/ws-icon && ./install.sh
+          rm -rf /tmp/ws-*
+
+          useradd -m -s /bin/bash -G sudo source || true
+          echo "source:1234" | chpasswd
+
+          apt-get clean
+          rm -rf /var/lib/apt/lists/*
+          EOF
+
+          sudo chmod +x ~/build/chroot/setup.sh
+          sudo chroot ~/build/chroot /setup.sh
+          sudo rm -f ~/build/chroot/setup.sh
+
+      - name: 6. Baglantilari Kapat
+        if: always()
+        run: |
+          sudo umount -lf ~/build/chroot/dev/pts || true
+          sudo umount -lf ~/build/chroot/dev || true
+          sudo umount -lf ~/build/chroot/proc || true
+          sudo umount -lf ~/build/chroot/sys || true
+
+      - name: 7. ISO Paketle
+        run: |
+          cd ~/build
+          sudo cp chroot/boot/vmlinuz-*-generic iso/casper/vmlinuz
+          sudo cp chroot/boot/initrd.img-*-generic iso/casper/initrd
+
+          sudo mksquashfs chroot iso/casper/filesystem.squashfs -comp xz
+          printf $(sudo du -sx --block-size=1 chroot | cut -f1) | sudo tee iso/casper/filesystem.size
+
+          cat << 'EOF' > iso/boot/grub/grub.cfg
+          set default="0"
+          set timeout=5
+          menuentry "Source OS Gamer (Live Mode)" {
+              linux /casper/vmlinuz boot=casper quiet splash ---
+              initrd /casper/initrd
+          }
+          EOF
+
+          grub-mkrescue -o ~/source-os-gamer.iso iso/ -- -volid "SOURCE_OS_GAMER"
+
+          mkdir -p ~/release-files
+          if [ $(stat -c%s ~/source-os-gamer.iso) -gt 1900000000 ]; then
+            split -b 1800M ~/source-os-gamer.iso ~/release-files/source-os-gamer.iso.part-
+          else
+            cp ~/source-os-gamer.iso ~/release-files/
+          fi
+
+      - name: 8. Releases Bolumune Yukle
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0-build-${{ github.run_number }}
+          name: Source OS Gamer v1.0 (Build #${{ github.run_number }})
+          files: ~/release-files/*
