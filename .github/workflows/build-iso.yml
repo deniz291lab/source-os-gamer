@@ -10,75 +10,115 @@ jobs:
   build-ubuntu-iso:
     runs-on: ubuntu-latest
     steps:
-      - name: Depoyu Cek
+      - name: 1. Depoyu Cek
         uses: actions/checkout@v4
 
-      - name: Gerekli Araclari Kur (live-build)
+      - name: 2. Disk Alanini Temizle ve Gerekli Paketleri Kur
         run: |
-          sudo apt-get update
-          sudo apt-get install -y live-build debootstrap squashfs-tools xorriso
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost
+          sudo apt-get update -y
+          sudo apt-get install -y debootstrap squashfs-tools xorriso grub-pc-bin grub-efi-amd64-bin mtools git curl
 
-      - name: Source OS Gamer Yapilandirmasini Hazirla
+      - name: 3. Ubuntu 24.04 (Noble) Temel Sistemini Kur
         run: |
-          mkdir -p source-os-build && cd source-os-build
-          lb config \
-            --mode ubuntu \
-            --distribution noble \
-            --archive-areas "main restricted universe multiverse" \
-            --architectures amd64 \
-            --linux-packages linux-image-generic \
-            --iso-application "Source OS Gamer" \
-            --iso-publisher "deniz291lab" \
-            --iso-volume "SOURCE_OS_GAMER"
+          mkdir -p ~/build/chroot ~/build/iso/casper ~/build/iso/boot/grub
+          sudo debootstrap --arch=amd64 noble ~/build/chroot http://ubuntu.com
 
-          mkdir -p config/package-lists
-          cat << 'EOF' > config/package-lists/source-os.list.chroot
-          kde-plasma-desktop
-          sddm
-          konsole
-          dolphin
-          firefox
-          gamemode
-          mangohud
-          git
-          curl
-          qt5-style-kvantum
-          qt5-style-kvantum-themes
-          casper
+      - name: 4. Sistem Kaynaklarini Bagla ve Depolari Ayarla
+        run: |
+          sudo mount --bind /dev ~/build/chroot/dev
+          sudo mount --bind /dev/pts ~/build/chroot/dev/pts
+          sudo mount -t proc proc ~/build/chroot/proc
+          sudo mount -t sysfs sysfs ~/build/chroot/sys
+          sudo cp /etc/resolv.conf ~/build/chroot/etc/resolv.conf
+
+          sudo tee ~/build/chroot/etc/apt/sources.list > /dev/null << 'EOF'
+          deb http://ubuntu.com noble main restricted universe multiverse
+          deb http://ubuntu.com noble-updates main restricted universe multiverse
+          deb http://ubuntu.com noble-security main restricted universe multiverse
           EOF
 
-      - name: macOS Tahoe Liquid Glass ve Oyun Ayarlarini Ekle
+      - name: 5. Cekirdek, KDE Plasma (Liquid Glass) ve Oyun Paketlerini Yukle
         run: |
-          cd source-os-build
-          mkdir -p config/hooks/live
-          cat << 'EOF' > config/hooks/live/01-macos-gaming.hook.chroot
-          #!/bin/bash
-          set -e
-          echo "Source OS Gamer yapilandiriliyor..."
-          
-          # Isletim sistemi adini degistir
-          sed -i 's/PRETTY_NAME=".*"/PRETTY_NAME="Source OS Gamer (Ubuntu)"/g' /etc/os-release
-          sed -i 's/NAME=".*"/NAME="Source OS Gamer"/g' /etc/os-release
+          sudo chroot ~/build/chroot /bin/bash -e -c '
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update -y
+            apt-get install -y --no-install-recommends \
+              linux-image-generic \
+              casper \
+              network-manager \
+              wireless-tools \
+              net-tools \
+              locales \
+              sudo \
+              kde-plasma-desktop \
+              sddm \
+              konsole \
+              dolphin \
+              firefox \
+              gamemode \
+              mangohud \
+              git \
+              curl \
+              qt5-style-kvantum \
+              qt5-style-kvantum-themes
 
-          # WhiteSur macOS Temasi ve Ikonlarini Indir
-          git clone https://github.com /tmp/WhiteSur-kde
-          cd /tmp/WhiteSur-kde && ./install.sh
-          
-          git clone https://github.com /tmp/WhiteSur-icon
-          cd /tmp/WhiteSur-icon && ./install.sh
+            locale-gen tr_TR.UTF-8 en_US.UTF-8
 
-          rm -rf /tmp/WhiteSur*
+            sed -i "s/PRETTY_NAME=\".*\"/PRETTY_NAME=\"Source OS Gamer (Ubuntu)\"/g" /etc/os-release
+            sed -i "s/NAME=\".*\"/NAME=\"Source OS Gamer\"/g" /etc/os-release
+
+            git clone --depth 1 https://github.com /tmp/WhiteSur-kde
+            cd /tmp/WhiteSur-kde && ./install.sh
+            git clone --depth 1 https://github.com /tmp/WhiteSur-icon
+            cd /tmp/WhiteSur-icon && ./install.sh
+            rm -rf /tmp/WhiteSur*
+
+            useradd -m -s /bin/bash -G sudo source || true
+            echo "source:1234" | chpasswd
+
+            apt-get clean
+            rm -rf /var/lib/apt/lists/*
+          '
+
+      - name: 6. Sanal Baglantilari Guvenle Kapat
+        if: always()
+        run: |
+          sudo umount -lf ~/build/chroot/dev/pts || true
+          sudo umount -lf ~/build/chroot/dev || true
+          sudo umount -lf ~/build/chroot/proc || true
+          sudo umount -lf ~/build/chroot/sys || true
+
+      - name: 7. ISO Dosyasini Paketle
+        run: |
+          cd ~/build
+          sudo cp chroot/boot/vmlinuz-*-generic iso/casper/vmlinuz
+          sudo cp chroot/boot/initrd.img-*-generic iso/casper/initrd
+
+          sudo mksquashfs chroot iso/casper/filesystem.squashfs -comp xz
+          printf $(sudo du -sx --block-size=1 chroot | cut -f1) | sudo tee iso/casper/filesystem.size
+
+          cat << 'EOF' > iso/boot/grub/grub.cfg
+          set default="0"
+          set timeout=5
+          menuentry "Source OS Gamer (Live Mode - macOS Liquid Glass)" {
+              linux /casper/vmlinuz boot=casper quiet splash ---
+              initrd /casper/initrd
+          }
           EOF
-          chmod +x config/hooks/live/01-macos-gaming.hook.chroot
 
-      - name: ISO Dosyasini Derle
-        run: |
-          cd source-os-build
-          sudo lb build
+          grub-mkrescue -o ~/source-os-gamer.iso iso/ -- -volid "SOURCE_OS_GAMER"
 
-      - name: ISO Dosyasini GitHub Releases Bolumune Yukle
+          mkdir -p ~/release-files
+          if [ $(stat -c%s ~/source-os-gamer.iso) -gt 1900000000 ]; then
+            split -b 1800M ~/source-os-gamer.iso ~/release-files/source-os-gamer.iso.part-
+          else
+            cp ~/source-os-gamer.iso ~/release-files/
+          fi
+
+      - name: 8. GitHub Releases Bolumune Yukle
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.0-alpha
-          name: Source OS Gamer v1.0 Alpha
-          files: source-os-build/*.iso
+          tag_name: v1.0-build-${{ github.run_number }}
+          name: Source OS Gamer v1.0 (Build #${{ github.run_number }})
+          files: ~/release-files/*
